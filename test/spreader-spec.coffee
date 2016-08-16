@@ -60,6 +60,7 @@ describe 'connect slurry stream', ->
 
         expect(JSON.parse data).to.deep.equal expectedData
         done()
+      return # stupid promises
 
   describe '-> remove', ->
     beforeEach (done) ->
@@ -87,6 +88,7 @@ describe 'connect slurry stream', ->
         return done error if error?
         expect(exists).to.equal 0
         done()
+      return # stupid promises
 
   describe 'emit: create', ->
     beforeEach (done) ->
