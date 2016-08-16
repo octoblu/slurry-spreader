@@ -11,6 +11,8 @@ before_script:
 - npm install -g codeclimate-test-reporter
 after_script:
 - codeclimate-test-reporter < coverage/lcov.info
+services:
+- redis
 deploy:
   provider: npm
   email: serveradmin@octoblu.com
