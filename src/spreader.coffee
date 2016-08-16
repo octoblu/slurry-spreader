@@ -8,7 +8,7 @@ async               = require 'async'
 UUID                = require 'uuid'
 
 class SlurrySpreader extends EventEmitter2
-  constructor: (options, dependencies) ->
+  constructor: (options={}, dependencies={}) ->
     {
       @redisUri
       @namespace
@@ -84,7 +84,7 @@ class SlurrySpreader extends EventEmitter2
 
   _acquireLock: (uuid, callback) =>
     @redlock.lock "locks:#{uuid}", 60*1000, (error, lock) =>
-      return callback error if error?
+      return callback() if error?
       return callback() unless lock?
       @_handleSlurry uuid, (error) =>
         lock.unlock()
@@ -107,7 +107,10 @@ class SlurrySpreader extends EventEmitter2
       return callback null, @_isSubscribed(uuid)
 
   _claimSlurry: (uuid, callback) =>
-    @redisClient.setex "claim:#{uuid}", Date.now(), 60, callback
+    @redisClient.setex "claim:#{uuid}", 60, Date.now(), callback
+
+  _unclaimSlurry: (uuid, callback) =>
+    @redisClient.del "claim:#{uuid}", callback
 
   _getSlurry: (uuid, callback) =>
     @redisClient.get "data:#{uuid}", (error, data) =>
@@ -135,9 +138,11 @@ class SlurrySpreader extends EventEmitter2
     @_getSlurry uuid, (error, slurry) =>
       return callback error if error?
       return callback() if @slurries[uuid] == slurry.nonce
-      delete @slurries[uuid]
-      @emit 'destroy', slurry
-      callback()
+      @_unclaimSlurry uuid, (error) =>
+        return callback error if error?
+        delete @slurries[uuid]
+        @emit 'destroy', slurry
+        callback()
 
   _isSubscribed: (uuid) =>
     @slurries[uuid]?
