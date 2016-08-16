@@ -5,19 +5,23 @@ RedisNS             = require '@octoblu/redis-ns'
 redis               = require 'ioredis'
 Redlock             = require 'redlock'
 async               = require 'async'
+UUID                = require 'uuid'
 
 class SlurrySpreader extends EventEmitter2
-  constructor: (options) ->
+  constructor: (options, dependencies) ->
     {
       @redisUri
       @namespace
     } = options
+    {
+      @UUID
+    } = dependencies
+    @UUID ?= UUID
     throw new Error('SlurrySpreader: @redisUri is required') unless @redisUri?
     throw new Error('SlurrySpreader: @namespace is required') unless @namespace?
 
   connect: (callback) =>
     @slurries = {}
-    @slurryLookup = {}
     @redisClient = new RedisNS @namespace, redis.createClient(@redisUri, dropBufferSupport: true)
     @queueClient = new RedisNS @namespace, redis.createClient(@redisUri, dropBufferSupport: true)
 
@@ -46,9 +50,24 @@ class SlurrySpreader extends EventEmitter2
       uuid
     } = slurry
 
+    nonce = @UUID.v4()
+    slurry.nonce = nonce
+
     tasks = [
-      async.apply @redisClient.rpush, 'slurries', uuid
       async.apply @redisClient.set, "data:#{uuid}", JSON.stringify(slurry)
+      async.apply @redisClient.rpush, 'slurries', uuid
+    ]
+
+    async.series tasks, callback
+
+  remove: (slurry, callback) =>
+    {
+      uuid
+    } = slurry
+
+    tasks = [
+      async.apply @redisClient.del, "data:#{uuid}"
+      async.apply @redisClient.lrem, 'slurries', 1, uuid
     ]
 
     async.series tasks, callback
@@ -77,27 +96,20 @@ class SlurrySpreader extends EventEmitter2
       return callback() unless claimable
       async.series [
         async.apply @_claimSlurry, uuid
-        async.apply @_updateSlurries, uuid
-        async.apply @_emitSlurry, uuid
+        async.apply @_createSlurry, uuid
+        async.apply @_destroySlurry, uuid
       ], callback
 
   _checkClaimableSlurry: (uuid, callback) =>
-    @redisClient.exists uuid, (error, exists) =>
+    @redisClient.exists "claim:#{uuid}", (error, exists) =>
       return callback error if error?
-      claimable = !@_isSubscribed(uuid) or !exists
-      return callback null, claimable
+      return callback null, true if exists == 0
+      return callback null, @_isSubscribed(uuid)
 
   _claimSlurry: (uuid, callback) =>
-    @redisClient.setex uuid, Date.now(), 60, (error) =>
-      return callback error if error?
-      callback()
+    @redisClient.setex "claim:#{uuid}", Date.now(), 60, callback
 
-  _emitSlurry: (uuid, callback) =>
-      @emit 'create', slurry
-      callback()
-
-  _updateSlurries: (uuid, callback) =>
-    return callback() if @_isSubscribed uuid
+  _getSlurry: (uuid, callback) =>
     @redisClient.get "data:#{uuid}", (error, data) =>
       return callback error if error?
       try
@@ -105,8 +117,26 @@ class SlurrySpreader extends EventEmitter2
       catch error
         return callback error
 
-      @slurryLookup[uuid] = slurry
-      @slurries[uuid] = true
+      callback null, slurry
+
+  _checkNonce: (slurry, callback) =>
+    return callback null, false
+
+  _createSlurry: (uuid, callback) =>
+    return callback() if @_isSubscribed uuid
+    @_getSlurry uuid, (error, slurry) =>
+      return callback error if error?
+      @slurries[uuid] = slurry.nonce
+      @emit 'create', slurry
+      callback()
+
+  _destroySlurry: (uuid, callback) =>
+    return callback() unless @_isSubscribed uuid
+    @_getSlurry uuid, (error, slurry) =>
+      return callback error if error?
+      return callback() if @slurries[uuid] == slurry.nonce
+      delete @slurries[uuid]
+      @emit 'destroy', slurry
       callback()
 
   _isSubscribed: (uuid) =>
