@@ -1,0 +1,46 @@
+{
+  "name": "slurry-spreader",
+  "version": "1.0.0",
+  "description": "Spread the Slurry around",
+  "main": "index.js",
+  "scripts": {
+    "test": "istanbul cover _mocha -- -R spec --require coffee-coverage/register-istanbul"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/octoblu/slurry-spreader.git"
+  },
+  "keywords": [
+    "Octoblu",
+    "Meshblu",
+    "Slurry"
+  ],
+  "author": "Octoblu, Inc. <npm@octoblu.com>",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/octoblu/slurry-spreader/issues"
+  },
+  "homepage": "https://github.com/octoblu/slurry-spreader#readme",
+  "devDependencies": {
+    "chai": "^3.5.0",
+    "coffee-coverage": "^1.0.1",
+    "coffee-script": "^1.10.0",
+    "istanbul": "^0.4.4",
+    "mocha": "^3.0.2",
+    "mocha-istanbul": "^0.3.0",
+    "sinon": "^1.17.5",
+    "sinon-chai": "^2.8.0"
+  },
+  "dependencies": {
+    "@octoblu/redis-ns": "^1.3.1",
+    "async": "^2.0.1",
+    "debug": "^2.2.0",
+    "eventemitter2": "^2.1.0",
+    "ioredis": "^2.3.0",
+    "lodash": "^4.15.0",
+    "redlock": "^2.0.0"
+  },
+  "optionalDependencies": {
+    "hiredis": "^0.5.0"
+  }
+}
