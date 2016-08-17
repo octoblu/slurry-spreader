@@ -130,6 +130,7 @@ class SlurrySpreader extends EventEmitter2
     return callback() if @_isSubscribed uuid
     @_getSlurry uuid, (error, slurry) =>
       return callback error if error?
+      return callback 'Not Found' unless slurry?
       @slurries[uuid] = slurry.nonce
       @emit 'create', slurry
       callback()
@@ -138,11 +139,11 @@ class SlurrySpreader extends EventEmitter2
     return callback() unless @_isSubscribed uuid
     @_getSlurry uuid, (error, slurry) =>
       return callback error if error?
-      return callback() if @slurries[uuid] == slurry.nonce
+      return callback() if slurry?.nonce? && @slurries[uuid] == slurry?.nonce
       @_unclaimSlurry uuid, (error) =>
         return callback error if error?
         delete @slurries[uuid]
-        @emit 'destroy', slurry
+        @emit 'destroy', slurry || {uuid}
         callback()
 
   _isSubscribed: (uuid) =>
