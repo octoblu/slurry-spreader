@@ -55,6 +55,7 @@ class SlurrySpreader extends EventEmitter2
 
     tasks = [
       async.apply @redisClient.set, "data:#{uuid}", JSON.stringify(slurry)
+      async.apply @redisClient.lrem, 'slurries', 0, uuid
       async.apply @redisClient.rpush, 'slurries', uuid
     ]
 
@@ -67,7 +68,7 @@ class SlurrySpreader extends EventEmitter2
 
     tasks = [
       async.apply @redisClient.del, "data:#{uuid}"
-      async.apply @redisClient.lrem, 'slurries', 1, uuid
+      async.apply @redisClient.lrem, 'slurries', 0, uuid
     ]
 
     async.series tasks, callback
