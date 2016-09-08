@@ -90,14 +90,14 @@ describe 'connect slurry stream', ->
         done()
       return # stupid promises
 
-  describe '-> end', ->
+  describe '-> close', ->
     beforeEach (done) ->
       slurry =
         uuid: 'user-device-uuid'
         auth:
           uuid: 'cred-uuid'
           token: 'cred-token'
-      @spreader.end slurry, done
+      @spreader.close slurry, done
       return # stupid promises
 
     it 'should remove the claim in redis', (done) ->

@@ -61,7 +61,7 @@ class SlurrySpreader extends EventEmitter2
 
     async.series tasks, callback
 
-  end: (slurry, callback) =>
+  close: (slurry, callback) =>
     @_unclaimSlurry slurry, callback
 
   remove: (slurry, callback) =>
