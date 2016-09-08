@@ -98,6 +98,7 @@ describe 'connect slurry stream', ->
           uuid: 'cred-uuid'
           token: 'cred-token'
       @spreader.end slurry, done
+      return # stupid promises
 
     it 'should remove the claim in redis', (done) ->
       @redisClient.exists 'claim:user-device-uuid', (error, exists) =>
