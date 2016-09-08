@@ -61,6 +61,9 @@ class SlurrySpreader extends EventEmitter2
 
     async.series tasks, callback
 
+  end: (slurry, callback) =>
+    @_unclaimSlurry slurry, callback
+
   remove: (slurry, callback) =>
     {
       uuid
@@ -69,6 +72,7 @@ class SlurrySpreader extends EventEmitter2
     tasks = [
       async.apply @redisClient.del, "data:#{uuid}"
       async.apply @redisClient.lrem, 'slurries', 0, uuid
+      async.apply @_unclaimSlurry, slurry
     ]
 
     async.series tasks, callback

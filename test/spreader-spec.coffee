@@ -90,6 +90,22 @@ describe 'connect slurry stream', ->
         done()
       return # stupid promises
 
+  describe '-> end', ->
+    beforeEach (done) ->
+      slurry =
+        uuid: 'user-device-uuid'
+        auth:
+          uuid: 'cred-uuid'
+          token: 'cred-token'
+      @spreader.end slurry, done
+
+    it 'should remove the claim in redis', (done) ->
+      @redisClient.exists 'claim:user-device-uuid', (error, exists) =>
+        return done error if error?
+        expect(exists).to.equal 0
+        done()
+      return # stupid promises
+
   describe 'emit: create', ->
     beforeEach (done) ->
       doneTwice = _.after 2, done
