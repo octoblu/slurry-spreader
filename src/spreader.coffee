@@ -92,8 +92,9 @@ class SlurrySpreader extends EventEmitter2
       return callback() if error?
       return callback() unless lock?
       @_handleSlurry uuid, (error) =>
-        lock.unlock()
-        callback error
+        lock.unlock (lockError) =>
+          return callback lockError if lockError?
+          callback error
 
   _handleSlurry: (uuid, callback) =>
     @_checkClaimableSlurry uuid, (error, claimable) =>
