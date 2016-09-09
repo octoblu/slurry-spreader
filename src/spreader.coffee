@@ -39,7 +39,7 @@ class SlurrySpreader extends EventEmitter2
 
   stop: (callback) =>
     @stopped = true
-    callback()
+    async.eachSeries _.keys(@slurries), @_unclaimSlurry, callback
 
   _processQueueForever: =>
     async.forever @_processQueue, (error) =>
@@ -49,6 +49,8 @@ class SlurrySpreader extends EventEmitter2
     {
       uuid
     } = slurry
+
+    debug 'add', uuid
 
     nonce = @UUID.v4()
     slurry.nonce = nonce
@@ -68,6 +70,8 @@ class SlurrySpreader extends EventEmitter2
     {
       uuid
     } = slurry
+
+    debug 'remove', uuid
 
     tasks = [
       async.apply @redisClient.del, "data:#{uuid}"
@@ -99,6 +103,7 @@ class SlurrySpreader extends EventEmitter2
   _handleSlurry: (uuid, callback) =>
     @_checkClaimableSlurry uuid, (error, claimable) =>
       return callback error if error?
+      debug 'claimable', uuid, claimable
       return callback() unless claimable
       async.series [
         async.apply @_claimSlurry, uuid
@@ -116,6 +121,8 @@ class SlurrySpreader extends EventEmitter2
     @redisClient.setex "claim:#{uuid}", 60, Date.now(), callback
 
   _unclaimSlurry: (uuid, callback) =>
+    debug '_unclaimSlurry', uuid
+
     @redisClient.del "claim:#{uuid}", callback
 
   _getSlurry: (uuid, callback) =>
