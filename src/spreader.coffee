@@ -122,6 +122,7 @@ class SlurrySpreader extends EventEmitter2
   _unclaimSlurry: (uuid, callback) =>
     debug '_unclaimSlurry', uuid
 
+    delete @slurries[uuid]
     @redisClient.del "claim:#{uuid}", callback
 
   _getSlurry: (uuid, callback) =>
