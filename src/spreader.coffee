@@ -103,7 +103,6 @@ class SlurrySpreader extends EventEmitter2
   _handleSlurry: (uuid, callback) =>
     @_checkClaimableSlurry uuid, (error, claimable) =>
       return callback error if error?
-      debug 'claimable', uuid, claimable
       return callback() unless claimable
       async.series [
         async.apply @_claimSlurry, uuid
