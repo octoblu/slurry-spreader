@@ -1,6 +1,6 @@
 {
   "name": "slurry-spreader",
-  "version": "1.4.2",
+  "version": "1.4.3",
   "description": "Spread the Slurry around",
   "main": "index.js",
   "scripts": {
