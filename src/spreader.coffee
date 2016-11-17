@@ -142,7 +142,7 @@ class SlurrySpreader extends EventEmitter2
     return callback() if @_isSubscribed uuid
     @_getSlurry uuid, (error, slurry) =>
       return callback error if error?
-      return callback 'Not Found' unless slurry?
+      return callback new Error('Slurry Not Found') unless slurry?
       @slurries[uuid] = slurry.nonce
       @emit 'create', slurry
       callback()
