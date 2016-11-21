@@ -1,8 +1,13 @@
+{afterEach, beforeEach, describe, it} = global
+{expect} = require 'chai'
+sinon    = require 'sinon'
+
 _              = require 'lodash'
 async          = require 'async'
-SlurrySpreader = require '../src/spreader'
 RedisNS        = require '@octoblu/redis-ns'
 redis          = require 'ioredis'
+
+SlurrySpreader = require '../src/spreader'
 
 describe 'connect slurry stream', ->
   beforeEach (done) ->
@@ -108,53 +113,63 @@ describe 'connect slurry stream', ->
       return # stupid promises
 
   describe 'emit: create', ->
-    beforeEach (done) ->
-      doneTwice = _.after 2, done
-      @spreader.once 'create', (@slurry) =>
-        doneTwice()
+    describe 'when a slurry is added', ->
+      beforeEach (done) ->
+        doneTwice = _.after 2, done
+        @spreader.once 'create', (@slurry) =>
+          doneTwice()
 
-      @UUID.v4.returns 'this-is-a-nonce'
-      slurry =
-        uuid: 'user-device-uuid'
-        auth:
-          uuid: 'cred-uuid'
-          token: 'cred-token'
-      @spreader.add slurry, doneTwice
+        @UUID.v4.returns 'this-is-a-nonce'
+        slurry =
+          uuid: 'user-device-uuid'
+          auth:
+            uuid: 'cred-uuid'
+            token: 'cred-token'
+        @spreader.add slurry, doneTwice
 
-    it 'should be a slurry', ->
-      expectedData =
-        uuid: 'user-device-uuid'
-        nonce: 'this-is-a-nonce'
-        auth:
-          uuid: 'cred-uuid'
-          token: 'cred-token'
-
-      expect(@slurry).to.deep.equal expectedData
+      it 'should emit a slurry slurry', ->
+        expect(@slurry).to.deep.equal {
+          uuid: 'user-device-uuid'
+          nonce: 'this-is-a-nonce'
+          auth:
+            uuid: 'cred-uuid'
+            token: 'cred-token'
+        }
 
   describe 'emit: destroy', ->
-    beforeEach (done) ->
-      doneThrice = _.after 3, done
-      @spreader.once 'create', (slurry) =>
-        @UUID.v4.returns 'another-nonce'
-        @spreader.add slurry, doneThrice
+    describe 'when a slurry has been added', ->
+      beforeEach (done) ->
+        doneTwice = _.after 2, done
 
-      @spreader.once 'destroy', (@slurry) =>
-        doneThrice()
+        @spreader.once 'create', => doneTwice()
+        @UUID.v4.returns 'this-is-a-nonce'
+        slurry =
+          uuid: 'user-device-uuid'
+          auth:
+            uuid: 'cred-uuid'
+            token: 'cred-token'
+        @spreader.add slurry, doneTwice
 
-      @UUID.v4.returns 'this-is-a-nonce'
-      slurry =
-        uuid: 'user-device-uuid'
-        auth:
-          uuid: 'cred-uuid'
-          token: 'cred-token'
-      @spreader.add slurry, doneThrice
+      describe 'and the same slurry is re-added with a different nonce', ->
+        beforeEach (done) ->
+          doneTwice = _.after 2, done
 
-    it 'should be a slurry', ->
-      expectedData =
-        uuid: 'user-device-uuid'
-        nonce: 'another-nonce'
-        auth:
-          uuid: 'cred-uuid'
-          token: 'cred-token'
+          @spreader.once 'destroy', (@slurry) =>
+            doneTwice()
 
-      expect(@slurry).to.deep.equal expectedData
+          @UUID.v4.returns 'another-nonce'
+          slurry =
+            uuid: 'user-device-uuid'
+            auth:
+              uuid: 'cred-uuid'
+              token: 'cred-token'
+          @spreader.add slurry, doneTwice
+
+        it 'should be a slurry', ->
+          expect(@slurry).to.deep.equal {
+            uuid:  'user-device-uuid'
+            nonce: 'another-nonce'
+            auth:
+              uuid:  'cred-uuid'
+              token: 'cred-token'
+          }
