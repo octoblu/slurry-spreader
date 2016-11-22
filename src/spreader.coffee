@@ -61,7 +61,6 @@ class SlurrySpreader extends EventEmitter2
       return _.delay cb, 100
 
     @queueClient.brpoplpush 'slurries', 'slurries', 30, (error, uuid) =>
-      debug 'brpoplpush'
       return callback error if error?
       return callback() unless uuid?
       return callback() if @_isDelayed uuid
@@ -122,14 +121,12 @@ class SlurrySpreader extends EventEmitter2
       callback()
 
   _extendLock: (uuid, callback) =>
-    debug '_extendLock', uuid
     return callback() unless @_isSubscribed uuid
 
     slurry = @slurries[uuid]
     slurry.lock.extend @lockTimeout, callback
 
   _extendOrReleaseLock: (uuid, callback) =>
-    debug '_extendOrReleaseLock', uuid
     return unless @_isSubscribed uuid
 
     @_getSlurry uuid, (error, slurryData) =>
