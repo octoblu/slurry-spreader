@@ -114,7 +114,7 @@ class SlurrySpreader extends EventEmitter2
     @_getSlurry uuid, (error, slurry) =>
       return callback error if error?
       @slurries[uuid] = {lock, nonce: slurry?.nonce}
-      return @_releaseLockAndDelete uuid, callback unless slurry?
+      return @_releaseLockAndRemoveFromQueue uuid, callback unless slurry?
       @emit 'create', slurry
       callback()
 
@@ -122,7 +122,6 @@ class SlurrySpreader extends EventEmitter2
     return callback() unless @_isSubscribed uuid
 
     slurry = @slurries[uuid]
-    slurry.lockedUntil = Date.now() + @lockTimeout
     slurry.lock.extend @lockTimeout, callback
 
   _extendOrReleaseLock: (uuid, callback) =>
@@ -131,8 +130,9 @@ class SlurrySpreader extends EventEmitter2
     @_getSlurry uuid, (error, slurryData) =>
       return callback error if error?
       return callback() unless @_isSubscribed uuid # Might no longer be subscribed
-      return @_releaseLockAndDelete uuid, callback if _.isEmpty slurryData
-      return @_extendLock uuid, callback if slurryData?.nonce == @slurries[uuid].nonce
+      return @_releaseLockAndRemoveFromQueue uuid, callback if _.isEmpty slurryData
+      return @_unsubscribe uuid, callback                   if @_isLockExpired uuid
+      return @_extendLock uuid, callback                    if slurryData.nonce == @slurries[uuid].nonce
       return @_releaseLockAndUnsubscribe uuid, callback
 
   _getSlurry: (uuid, callback) =>
@@ -143,6 +143,9 @@ class SlurrySpreader extends EventEmitter2
   _isDelayed: (uuid) =>
     return false unless @_isSubscribed uuid
     return @slurries[uuid].delayedUntil > Date.now()
+
+  _isLockExpired: (uuid) =>
+    return @slurries[uuid].lock.expiration < Date.now()
 
   _isStopped: =>
     @stopped
@@ -169,15 +172,19 @@ class SlurrySpreader extends EventEmitter2
     return callback() unless @_isSubscribed uuid
 
     @emit 'destroy', {uuid}
-    slurry = @slurries[uuid]
-    delete @slurries[uuid]
-    slurry.lock.unlock callback
+    @_unsubscribe uuid, (error, slurry) =>
+      slurry.lock.unlock callback
 
-  _releaseLockAndDelete: (uuid, callback) =>
-    debug '_releaseLockAndDelete'
+  _releaseLockAndRemoveFromQueue: (uuid, callback) =>
+    debug '_releaseLockAndRemoveFromQueue'
     async.series [
       async.apply @redisClient.lrem, 'slurries', 0, uuid
       async.apply @_releaseLock, uuid
     ], callback
+
+  _unsubscribe: (uuid, callback) =>
+    slurry = @slurries[uuid]
+    delete @slurries[uuid]
+    callback null, slurry
 
 module.exports = SlurrySpreader
