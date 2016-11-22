@@ -55,6 +55,7 @@ class SlurrySpreader extends EventEmitter2
 
       return @_extendOrReleaseLock uuid, callback if @_isSubscribed uuid
       return @_acquireLock uuid, callback
+    return # stupid promises
 
   processQueueForever: =>
     async.until @_isStopped, @processQueue, (error) =>
