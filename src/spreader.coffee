@@ -43,6 +43,18 @@ class SlurrySpreader extends EventEmitter2
     @redlock = new Redlock [@queueClient], retryCount: 0
     callback()
 
+  delay: ({ uuid, timeout }, callback) =>
+    debug 'delay', uuid, timeout
+    timeout ?= 60 * 1000
+    return callback new Error "Not subscribed to this slurry: #{uuid}" unless @_isSubscribed uuid
+
+    slurry = @slurries[uuid]
+    slurry.lock.extend timeout, (error) =>
+      return callback error if error?
+      slurry.delayedUntil = Date.now() + timeout
+      callback()
+    return # stupid promises
+
   processQueue: (cb) =>
     callback = (error) =>
       return cb error if error?
@@ -52,6 +64,7 @@ class SlurrySpreader extends EventEmitter2
       debug 'brpoplpush'
       return callback error if error?
       return callback() unless uuid?
+      return callback() if @_isDelayed uuid
 
       return @_extendOrReleaseLock uuid, callback if @_isSubscribed uuid
       return @_acquireLock uuid, callback
@@ -129,6 +142,10 @@ class SlurrySpreader extends EventEmitter2
     @redisClient.get "data:#{uuid}", (error, data) =>
       return callback error if error?
       @_jsonParse data, callback
+
+  _isDelayed: (uuid) =>
+    return false unless @_isSubscribed uuid
+    return @slurries[uuid].delayedUntil > Date.now()
 
   _isStopped: =>
     @stopped

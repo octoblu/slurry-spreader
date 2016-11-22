@@ -130,7 +130,49 @@ describe 'connect slurry stream', ->
             done()
           return # stupid promises
 
-  describe 'processQueue', ->
+  describe '-> delay', ->
+    describe 'when a slurry is in the queue', ->
+      beforeEach (done) ->
+        data =
+          uuid: 'user-device-uuid'
+          nonce: 'this-is-a-nonce'
+          auth:
+            uuid: 'cred-uuid'
+            token: 'cred-token'
+
+        async.series [
+          async.apply @redisClient.set, 'data:user-device-uuid', JSON.stringify(data)
+          async.apply @redisClient.lpush, 'slurries', 'user-device-uuid'
+          async.apply @sut.processQueue
+        ], done
+
+      describe 'when delay is called', ->
+        beforeEach (done) ->
+          @sut.delay uuid: 'user-device-uuid', timeout: 1500, done
+
+        it 'should extend the lock', (done) ->
+          wait110ms = (fn) => _.delay fn, 1100
+          wait110ms =>
+            @redlock.lock "locks:user-device-uuid", 1000, (error, lock) =>
+              expect(lock).not.to.exist
+              expect(error).to.exist
+              done()
+            return # stupid promises
+
+        describe 'when the queue is process', ->
+          beforeEach (done) ->
+            @sut.processQueue done
+
+          it 'should not overwrite the lock extension', (done) ->
+            wait110ms = (fn) => _.delay fn, 1100
+            wait110ms =>
+              @redlock.lock "locks:user-device-uuid", 1000, (error, lock) =>
+                expect(lock).not.to.exist
+                expect(error).to.exist
+                done()
+              return # stupid promises
+
+  describe '-> processQueue', ->
     describe 'when a slurry is in the queue', ->
       beforeEach (done) ->
         data =
@@ -162,8 +204,8 @@ describe 'connect slurry stream', ->
           ], done
 
         it 'should extend the lock', (done) ->
-          wait75ms = (fn) => _.delay fn, 40
-          wait75ms =>
+          wait40ms = (fn) => _.delay fn, 40
+          wait40ms =>
             @redlock.lock "locks:user-device-uuid", 1000, (error, lock) =>
               expect(lock).not.to.exist
               expect(error).to.exist
