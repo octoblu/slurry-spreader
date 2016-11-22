@@ -33,6 +33,7 @@ class SlurrySpreader extends EventEmitter2
     async.series tasks, callback
 
   close: ({uuid}, callback) =>
+    debug 'close', uuid
     @_releaseLock uuid, callback
 
   connect: (callback) =>
@@ -85,6 +86,7 @@ class SlurrySpreader extends EventEmitter2
       callback()
 
   stop: (callback) =>
+    debug 'stop'
     @stopped = true
     async.eachSeries _.keys(@slurries), @_releaseLock, callback
 
@@ -120,6 +122,7 @@ class SlurrySpreader extends EventEmitter2
     return callback() unless @_isSubscribed uuid
 
     slurry = @slurries[uuid]
+    slurry.lockedUntil = Date.now() + @lockTimeout
     slurry.lock.extend @lockTimeout, callback
 
   _extendOrReleaseLock: (uuid, callback) =>
@@ -130,7 +133,7 @@ class SlurrySpreader extends EventEmitter2
       return callback() unless @_isSubscribed uuid # Might no longer be subscribed
       return @_releaseLockAndDelete uuid, callback if _.isEmpty slurryData
       return @_extendLock uuid, callback if slurryData?.nonce == @slurries[uuid].nonce
-      return @_releaseLock uuid, callback
+      return @_releaseLockAndUnsubscribe uuid, callback
 
   _getSlurry: (uuid, callback) =>
     @redisClient.get "data:#{uuid}", (error, data) =>
@@ -159,6 +162,15 @@ class SlurrySpreader extends EventEmitter2
     return callback() unless @_isSubscribed uuid
     @emit 'destroy', {uuid}
     slurry = @slurries[uuid]
+    slurry.lock.unlock callback
+
+  _releaseLockAndUnsubscribe: (uuid, callback) =>
+    debug '_releaseLockAndUnsubscribe', uuid
+    return callback() unless @_isSubscribed uuid
+
+    @emit 'destroy', {uuid}
+    slurry = @slurries[uuid]
+    delete @slurries[uuid]
     slurry.lock.unlock callback
 
   _releaseLockAndDelete: (uuid, callback) =>
