@@ -51,7 +51,7 @@ class SlurrySpreader extends EventEmitter2
     slurry = @slurries[uuid]
     slurry.lock.extend timeout, (error) =>
       return callback error if error?
-      slurry.delayedUntil = Date.now() + timeout
+      delete @slurries[uuid]
       callback()
     return # stupid promises
 
@@ -75,12 +75,7 @@ class SlurrySpreader extends EventEmitter2
 
   remove: ({ uuid }, callback) =>
     debug 'remove', uuid
-
-    tasks = [
-      async.apply @redisClient.del, "data:#{uuid}"
-    ]
-
-    async.series tasks, callback
+    @redisClient.del "data:#{uuid}", callback
 
   start: (callback) =>
     @connect (error) =>
@@ -93,10 +88,10 @@ class SlurrySpreader extends EventEmitter2
     async.eachSeries _.keys(@slurries), @_releaseLock, callback
 
   _acquireLock: (uuid, callback) =>
-    debug '_acquireLock', "locks:#{uuid}", @lockTimeout
     @redlock.lock "locks:#{uuid}", @lockTimeout, (error, lock) =>
       return callback() if error?
       return callback() unless lock?
+      debug 'acquiredLock', "locks:#{uuid}", @lockTimeout
       @_createSlurry {uuid, lock}, callback
 
   _checkClaimableSlurry: (uuid, callback) =>
@@ -127,11 +122,12 @@ class SlurrySpreader extends EventEmitter2
     slurry.lock.extend @lockTimeout, callback
 
   _extendOrReleaseLock: (uuid, callback) =>
-    return unless @_isSubscribed uuid
+    return callback() unless @_isSubscribed uuid
 
     @_getSlurry uuid, (error, slurryData) =>
       return callback error if error?
-      return @_releaseLockAndDelete uuid, callback unless slurryData?
+      return callback() unless @_isSubscribed uuid # Might no longer be subscribed
+      return @_releaseLockAndDelete uuid, callback if _.isEmpty slurryData
       return @_extendLock uuid, callback if slurryData?.nonce == @slurries[uuid].nonce
       return @_releaseLock uuid, callback
 
