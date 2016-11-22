@@ -76,6 +76,7 @@ class SlurrySpreader extends EventEmitter2
   remove: ({ uuid }, callback) =>
     debug 'remove', uuid
     @redisClient.del "data:#{uuid}", callback
+    return # stupid promises
 
   start: (callback) =>
     @connect (error) =>
