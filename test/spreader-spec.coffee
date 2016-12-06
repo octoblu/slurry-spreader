@@ -2,16 +2,22 @@
 {expect} = require 'chai'
 sinon    = require 'sinon'
 
-_       = require 'lodash'
-async   = require 'async'
-RedisNS = require '@octoblu/redis-ns'
-redis   = require 'ioredis'
-Redlock = require 'redlock'
+async      = require 'async'
+fs         = require 'fs'
+redis      = require 'ioredis'
+_          = require 'lodash'
+Encryption = require 'meshblu-encryption'
+RedisNS    = require '@octoblu/redis-ns'
+path       = require 'path'
+Redlock    = require 'redlock'
 
+PRIVATE_KEY = fs.readFileSync path.join(__dirname, 'fixtures/private-key.pem')
 SlurrySpreader = require '../src/spreader'
 
 describe 'connect slurry stream', ->
   beforeEach (done) ->
+    @encryption = Encryption.fromJustGuess PRIVATE_KEY
+
     rawClient = redis.createClient(dropBufferSupport: true)
     @redisClient = new RedisNS 'test:slurry:spreader', rawClient
     @redisClient.on 'ready', =>
@@ -32,6 +38,7 @@ describe 'connect slurry stream', ->
       redisUri: 'redis://localhost:6379'
       namespace: 'test:slurry:spreader'
       lockTimeout: 1000
+      privateKey: PRIVATE_KEY
     }, {@UUID}
 
     @sut.connect done
@@ -61,9 +68,10 @@ describe 'connect slurry stream', ->
         expect(@members).to.include 'user-device-uuid'
         done()
 
-    it 'should save the metadata in redis', (done) ->
+    it 'should encrypt the metadata and save in redis', (done) ->
       @redisClient.get 'data:user-device-uuid', (error, data) =>
         return done error if error?
+        decrypted = @encryption.decrypt data
         expectedData =
           uuid: 'user-device-uuid'
           nonce: 'this-is-a-nonce'
@@ -71,7 +79,7 @@ describe 'connect slurry stream', ->
             uuid: 'cred-uuid'
             token: 'cred-token'
 
-        expect(JSON.parse data).to.deep.equal expectedData
+        expect(JSON.parse decrypted).to.deep.equal expectedData
         done()
       return # stupid promises
 
@@ -140,8 +148,10 @@ describe 'connect slurry stream', ->
             uuid: 'cred-uuid'
             token: 'cred-token'
 
+        encrypted = @encryption.encrypt JSON.stringify data
+
         async.series [
-          async.apply @redisClient.set, 'data:user-device-uuid', JSON.stringify(data)
+          async.apply @redisClient.set, 'data:user-device-uuid', encrypted
           async.apply @redisClient.lpush, 'slurries', 'user-device-uuid'
           async.apply @sut.processQueue
         ], done
@@ -182,8 +192,10 @@ describe 'connect slurry stream', ->
             uuid: 'cred-uuid'
             token: 'cred-token'
 
+        encrypted = @encryption.encrypt JSON.stringify data
+
         async.series [
-          async.apply @redisClient.set, 'data:user-device-uuid', JSON.stringify(data)
+          async.apply @redisClient.set, 'data:user-device-uuid', encrypted
           async.apply @redisClient.lpush, 'slurries', 'user-device-uuid'
           async.apply @sut.processQueue
         ], done
@@ -223,10 +235,12 @@ describe 'connect slurry stream', ->
               uuid: 'cred-uuid'
               token: 'cred-token'
 
+          encrypted = @encryption.encrypt JSON.stringify data
+
           @onDestroy = sinon.spy => doneTwice()
           @sut.once 'destroy', @onDestroy
           async.series [
-            async.apply @redisClient.set, 'data:user-device-uuid', JSON.stringify(data)
+            async.apply @redisClient.set, 'data:user-device-uuid', encrypted
             async.apply @redisClient.lpush, 'slurries', 'user-device-uuid'
             async.apply @sut.processQueue
           ], doneTwice
@@ -267,3 +281,35 @@ describe 'connect slurry stream', ->
               uuid: 'cred-uuid'
               token: 'cred-token'
           }
+
+    describe 'when an old (unencrypted) slurry is present', ->
+      beforeEach (done) ->
+        slurry =
+          uuid: 'user-device-uuid'
+          nonce: 'this-is-a-nonce'
+          auth:
+            uuid: 'cred-uuid'
+            token: 'cred-token'
+
+        async.series [
+          async.apply @redisClient.set, 'data:user-device-uuid', JSON.stringify(slurry)
+          async.apply @redisClient.lpush, 'slurries', 'user-device-uuid'
+        ], done
+
+      describe 'and the queue is processed', ->
+        beforeEach (done) ->
+          @sut.processQueue done
+
+        it 'should encrypt the data', (done) ->
+          @redisClient.get 'data:user-device-uuid', (error, encrypted) =>
+            return done error if error?
+
+            expect(JSON.parse @encryption.decrypt encrypted).to.containSubset {
+              uuid: 'user-device-uuid'
+              nonce: 'this-is-a-nonce'
+              auth:
+                uuid: 'cred-uuid'
+                token: 'cred-token'
+            }
+            done()
+          return # stupid mocha

@@ -1,19 +1,22 @@
-_                   = require 'lodash'
-EventEmitter2       = require 'eventemitter2'
-debug               = require('debug')('slurry-spreader:spreader')
-RedisNS             = require '@octoblu/redis-ns'
-redis               = require 'ioredis'
-Redlock             = require 'redlock'
-async               = require 'async'
-UUID                = require 'uuid'
+async         = require 'async'
+EventEmitter2 = require 'eventemitter2'
+redis         = require 'ioredis'
+_             = require 'lodash'
+Encryption    = require 'meshblu-encryption'
+RedisNS       = require '@octoblu/redis-ns'
+Redlock       = require 'redlock'
+UUID          = require 'uuid'
+debug         = require('debug')('slurry-spreader:spreader')
 
 class SlurrySpreader extends EventEmitter2
-  constructor: ({@redisUri, @namespace, @lockTimeout}, dependencies={}) ->
+  constructor: ({@redisUri, @namespace, @lockTimeout, privateKey}, dependencies={}) ->
     {@UUID} = dependencies
 
     throw new Error('SlurrySpreader: @redisUri is required') unless @redisUri?
     throw new Error('SlurrySpreader: @namespace is required') unless @namespace?
+    throw new Error('SlurrySpreader: @privateKey is required') unless privateKey?
 
+    @encryption = Encryption.fromJustGuess privateKey
     @UUID ?= UUID
     @lockTimeout ?= 60 * 1000
 
@@ -24,13 +27,16 @@ class SlurrySpreader extends EventEmitter2
 
     slurry.nonce = @UUID.v4()
 
-    tasks = [
-      async.apply @redisClient.set, "data:#{uuid}", JSON.stringify(slurry)
-      async.apply @redisClient.lrem, 'slurries', 0, uuid
-      async.apply @redisClient.rpush, 'slurries', uuid
-    ]
+    @_encrypt JSON.stringify(slurry), (error, encrypted) =>
+      return callback error if error?
 
-    async.series tasks, callback
+      tasks = [
+        async.apply @redisClient.set, "data:#{uuid}", encrypted
+        async.apply @redisClient.lrem, 'slurries', 0, uuid
+        async.apply @redisClient.rpush, 'slurries', uuid
+      ]
+
+      async.series tasks, callback
 
   close: ({uuid}, callback) =>
     debug 'close', uuid
@@ -66,8 +72,12 @@ class SlurrySpreader extends EventEmitter2
       return callback() unless uuid?
       return callback() if @_isDelayed uuid
 
-      return @_extendOrReleaseLock uuid, callback if @_isSubscribed uuid
-      return @_acquireLock uuid, callback
+      @_isEncrypted uuid, (error, isEncrypted) =>
+        return callback error if error?
+        return @_encryptAndRelease uuid, callback unless isEncrypted
+
+        return @_extendOrReleaseLock uuid, callback if @_isSubscribed uuid
+        return @_acquireLock uuid, callback
     return # stupid promises
 
   processQueueForever: =>
@@ -118,6 +128,27 @@ class SlurrySpreader extends EventEmitter2
       @emit 'create', slurry
       callback()
 
+  _decrypt: (encrypted, callback) =>
+    try
+      callback null, @encryption.decrypt encrypted
+    catch error
+      callback error
+
+  _encrypt: (data, callback) =>
+    try
+      callback null, @encryption.encrypt data
+    catch error
+      callback error
+
+  _encryptAndRelease: (uuid, callback) =>
+    @redisClient.get "data:#{uuid}", (error, decrypted) =>
+      return callback error if error?
+      @_encrypt decrypted, (error, encrypted) =>
+        return callback error if error?
+        @redisClient.set "data:#{uuid}", encrypted, (error) =>
+          return callback error if error?
+          @_releaseLock uuid, callback
+
   _extendLock: (uuid, callback) =>
     return callback() unless @_isSubscribed uuid
 
@@ -136,13 +167,24 @@ class SlurrySpreader extends EventEmitter2
       return @_releaseLockAndUnsubscribe uuid, callback
 
   _getSlurry: (uuid, callback) =>
-    @redisClient.get "data:#{uuid}", (error, data) =>
+    @redisClient.get "data:#{uuid}", (error, encrypted) =>
       return callback error if error?
-      @_jsonParse data, callback
+
+      @_decrypt encrypted, (error, decrypted) =>
+        return callback error if error?
+
+        @_jsonParse decrypted, callback
 
   _isDelayed: (uuid) =>
     return false unless @_isSubscribed uuid
     return @slurries[uuid].delayedUntil > Date.now()
+
+  _isEncrypted: (uuid, callback) =>
+    @redisClient.get "data:#{uuid}", (error, encrypted) =>
+      return callback error if error?
+      @_decrypt encrypted, (error) =>
+        return callback null, false if error? # If we can't decrypt it, it ain't encrypted
+        return callback null, true
 
   _isLockExpired: (uuid) =>
     return @slurries[uuid].lock.expiration < Date.now()
