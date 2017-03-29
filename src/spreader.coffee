@@ -55,7 +55,7 @@ class SlurrySpreader extends EventEmitter2
     timeout ?= 60 * 1000
     timeout = Math.round(timeout/1000)
     return callback new Error "Not subscribed to this slurry: #{uuid}" unless @_isSubscribed uuid
-    @redisClient.setex "delay:#{uuid}", timeout, true, callback
+    @redisClient.setex "delay:#{uuid}", timeout, Date.now(), callback
     return # stupid promises
 
   processQueue: (cb) =>
@@ -172,7 +172,6 @@ class SlurrySpreader extends EventEmitter2
         @_jsonParse decrypted, callback
 
   _isDelayed: (uuid, callback) =>
-    return callback null, false unless @_isSubscribed uuid
     @redisClient.exists "delay:#{uuid}", (error, delayed) =>
       return callback error, (delayed==1)
 
