@@ -53,13 +53,9 @@ class SlurrySpreader extends EventEmitter2
   delay: ({ uuid, timeout }, callback) =>
     debug 'delay', uuid, timeout
     timeout ?= 60 * 1000
+    timeout = Math.round(timeout/1000)
     return callback new Error "Not subscribed to this slurry: #{uuid}" unless @_isSubscribed uuid
-
-    slurry = @slurries[uuid]
-    slurry.lock.extend timeout, (error) =>
-      return callback error if error?
-      delete @slurries[uuid]
-      callback()
+    @redisClient.setex "delay:#{uuid}", timeout, true, callback
     return # stupid promises
 
   processQueue: (cb) =>
@@ -75,10 +71,12 @@ class SlurrySpreader extends EventEmitter2
         return callback error if error?
         return @_encryptAndRelease uuid, callback unless isEncrypted
 
-        if @_isDelayed(uuid) || @_isSubscribed(uuid)
-          return @_extendOrReleaseLock uuid, callback
+        @_isDelayed uuid, (error, delayed) =>
+          return callback error if error?
+          return callback() if delayed == true
+          return @_extendOrReleaseLock uuid, callback if @_isSubscribed(uuid)
+          return @_acquireLock uuid, callback
 
-        return @_acquireLock uuid, callback
     return # stupid promises
 
   processQueueForever: =>
@@ -173,9 +171,10 @@ class SlurrySpreader extends EventEmitter2
 
         @_jsonParse decrypted, callback
 
-  _isDelayed: (uuid) =>
-    return false unless @_isSubscribed uuid
-    return @slurries[uuid].delayedUntil > Date.now()
+  _isDelayed: (uuid, callback) =>
+    return callback null, false unless @_isSubscribed uuid
+    @redisClient.exists "delay:#{uuid}", (error, delayed) =>
+      return callback error, (delayed==1)
 
   _isEncrypted: (uuid, callback) =>
     @redisClient.get "data:#{uuid}", (error, encrypted) =>

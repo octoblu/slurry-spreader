@@ -156,16 +156,31 @@ describe 'connect slurry stream', ->
           async.apply @sut.processQueue
         ], done
 
+      describe 'when delay is not called', ->
+        beforeEach (done) ->
+          @sut._isDelayed 'user-device-uuid', (error, @delayed) =>
+            done()
+          return
+
+        it 'sut._isDelayed should be false', ->
+          expect(@delayed).to.equal false
+
       describe 'when delay is called', ->
         beforeEach (done) ->
           @sut.delay uuid: 'user-device-uuid', timeout: 1500, done
 
-        it 'should extend the lock', (done) ->
+        it 'should be delayed in sut._isDelayed', (done) ->
+          @sut._isDelayed 'user-device-uuid', (error, delayed) =>
+            expect(delayed).to.equal true
+            done()
+          return
+
+        it 'should set the delay redis property', (done) ->
           wait110ms = (fn) => _.delay fn, 1100
           wait110ms =>
-            @redlock.lock "locks:user-device-uuid", 1000, (error, lock) =>
-              expect(lock).not.to.exist
-              expect(error).to.exist
+            @redisClient.exists "delay:user-device-uuid", (error, delay) =>
+              expect(delay).to.equal 1
+              expect(error).to.not.exist
               done()
             return # stupid promises
 
@@ -173,12 +188,12 @@ describe 'connect slurry stream', ->
           beforeEach (done) ->
             @sut.processQueue done
 
-          it 'should not overwrite the lock extension', (done) ->
+          it 'should still be delayed', (done) ->
             wait110ms = (fn) => _.delay fn, 1100
             wait110ms =>
-              @redlock.lock "locks:user-device-uuid", 1000, (error, lock) =>
-                expect(lock).not.to.exist
-                expect(error).to.exist
+              @redisClient.exists "delay:user-device-uuid", (error, delay) =>
+                expect(delay).to.equal 1
+                expect(error).to.not.exist
                 done()
               return # stupid promises
 
