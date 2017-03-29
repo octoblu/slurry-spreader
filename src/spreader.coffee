@@ -70,13 +70,14 @@ class SlurrySpreader extends EventEmitter2
     @queueClient.brpoplpush 'slurries', 'slurries', 30, (error, uuid) =>
       return callback error if error?
       return callback() unless uuid?
-      return callback() if @_isDelayed uuid
 
       @_isEncrypted uuid, (error, isEncrypted) =>
         return callback error if error?
         return @_encryptAndRelease uuid, callback unless isEncrypted
 
-        return @_extendOrReleaseLock uuid, callback if @_isSubscribed uuid
+        if @_isDelayed(uuid) || @_isSubscribed(uuid)
+          return @_extendOrReleaseLock uuid, callback
+
         return @_acquireLock uuid, callback
     return # stupid promises
 
@@ -112,9 +113,6 @@ class SlurrySpreader extends EventEmitter2
       return callback error if error?
       return callback null, true if exists == 0
       return callback null, @_isSubscribed(uuid)
-
-  _checkNonce: (slurry, callback) =>
-    return callback null, false
 
   _claimSlurry: (uuid, callback) =>
     @redisClient.setex "claim:#{uuid}", 60, Date.now(), callback
