@@ -100,26 +100,20 @@ class SlurrySpreader extends EventEmitter2
     async.eachSeries _.keys(@slurries), @_releaseLock, callback
 
   _acquireLock: (uuid, callback) =>
+    debug '_acquireLock', uuid
     @redlock.lock "locks:#{uuid}", @lockTimeout, (error, lock) =>
       return callback() if error?
       return callback() unless lock?
       debug 'acquiredLock', "locks:#{uuid}", @lockTimeout
       @_createSlurry {uuid, lock}, callback
 
-  _checkClaimableSlurry: (uuid, callback) =>
-    @redisClient.exists "claim:#{uuid}", (error, exists) =>
-      return callback error if error?
-      return callback null, true if exists == 0
-      return callback null, @_isSubscribed(uuid)
-
-  _claimSlurry: (uuid, callback) =>
-    @redisClient.setex "claim:#{uuid}", 60, Date.now(), callback
-
   _createSlurry: ({uuid, lock}, callback) =>
+    debug '_createSlurry', uuid
     return callback() if @_isSubscribed uuid
     @_getSlurry uuid, (error, slurry) =>
       return callback error if error?
       @slurries[uuid] = {lock, nonce: slurry?.nonce}
+      debug "created slurry: #{uuid}"
       return @_releaseLockAndRemoveFromQueue uuid, callback unless slurry?
       @emit 'create', slurry
       callback()
@@ -137,6 +131,7 @@ class SlurrySpreader extends EventEmitter2
       callback error
 
   _encryptAndRelease: (uuid, callback) =>
+    debug '_encryptAndRelease', uuid
     @redisClient.get "data:#{uuid}", (error, decrypted) =>
       return callback error if error?
       @_encrypt decrypted, (error, encrypted) =>
@@ -146,6 +141,7 @@ class SlurrySpreader extends EventEmitter2
           @_releaseLock uuid, callback
 
   _extendLock: (uuid, callback) =>
+    debug '_extendLock', uuid
     return callback() unless @_isSubscribed uuid
 
     slurry = @slurries[uuid]
@@ -173,6 +169,7 @@ class SlurrySpreader extends EventEmitter2
 
   _isDelayed: (uuid, callback) =>
     @redisClient.exists "delay:#{uuid}", (error, delayed) =>
+      debug "isDelayed: #{uuid} = #{delayed}"
       return callback error, (delayed==1)
 
   _isEncrypted: (uuid, callback) =>
@@ -214,13 +211,14 @@ class SlurrySpreader extends EventEmitter2
       slurry.lock.unlock callback
 
   _releaseLockAndRemoveFromQueue: (uuid, callback) =>
-    debug '_releaseLockAndRemoveFromQueue'
+    debug '_releaseLockAndRemoveFromQueue', uuid
     async.series [
       async.apply @redisClient.lrem, 'slurries', 0, uuid
       async.apply @_releaseLock, uuid
     ], callback
 
   _unsubscribe: (uuid, callback) =>
+    debug '_unsubscribe', uuid
     slurry = @slurries[uuid]
     delete @slurries[uuid]
     callback null, slurry
