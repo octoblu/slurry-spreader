@@ -40,7 +40,7 @@ class SlurrySpreader extends EventEmitter2
 
   close: ({uuid}, callback) =>
     debug 'close', uuid
-    @_releaseLock uuid, callback
+    @_releaseLockAndUnsubscribe uuid, callback
 
   connect: (callback) =>
     @slurries = {}
@@ -97,7 +97,7 @@ class SlurrySpreader extends EventEmitter2
   stop: (callback) =>
     debug 'stop'
     @stopped = true
-    async.eachSeries _.keys(@slurries), @_releaseLock, callback
+    async.eachSeries _.keys(@slurries), @_releaseLockAndUnsubscribe, callback
 
   _acquireLock: (uuid, callback) =>
     debug '_acquireLock', uuid
@@ -138,7 +138,7 @@ class SlurrySpreader extends EventEmitter2
         return callback error if error?
         @redisClient.set "data:#{uuid}", encrypted, (error) =>
           return callback error if error?
-          @_releaseLock uuid, callback
+          @_releaseLockAndUnsubscribe uuid, callback
 
   _extendLock: (uuid, callback) =>
     debug '_extendLock', uuid
@@ -214,7 +214,7 @@ class SlurrySpreader extends EventEmitter2
     debug '_releaseLockAndRemoveFromQueue', uuid
     async.series [
       async.apply @redisClient.lrem, 'slurries', 0, uuid
-      async.apply @_releaseLock, uuid
+      async.apply @_releaseLockAndUnsubscribe, uuid
     ], callback
 
   _unsubscribe: (uuid, callback) =>
