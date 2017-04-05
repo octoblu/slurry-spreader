@@ -86,6 +86,16 @@ class SlurrySpreader extends EventEmitter2
     async.until @_isStopped, @processQueue, (error) =>
       throw error if error?
 
+  extendLocksForever: =>
+    @_extendLockInterval =  setInterval @_extendLockOnInterval, Math.floor(@lockTimeout / 2)
+
+
+  _extendLockOnInterval: =>
+    return clearInterval @_extendLockInterval if @_isStopped
+    locksToExtend = _.keys @slurries
+    async.each locksToExtend, @_extendLock, (error) =>
+      debug "extended #{locksToExtend.length} locks. Error: #{error?.stack}"
+
   remove: ({ uuid }, callback) =>
     debug 'remove', uuid
     @redisClient.del "data:#{uuid}", callback
@@ -95,6 +105,7 @@ class SlurrySpreader extends EventEmitter2
     @connect (error) =>
       return callback error if error?
       @processQueueForever()
+      @extendLocksForever()
       callback()
 
   stop: (callback) =>
