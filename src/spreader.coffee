@@ -51,8 +51,6 @@ class SlurrySpreader extends EventEmitter2
     @redlock.on 'clientError', (error) =>
       debug 'A redis error has occurred:', error
 
-    @extendLocksForever()
-    
     callback()
 
   delay: ({ uuid, timeout }, callback) =>
@@ -93,7 +91,7 @@ class SlurrySpreader extends EventEmitter2
     @_extendLockInterval =  setInterval @_extendLockOnInterval, Math.floor(@lockTimeout / 2)
 
   _extendLockOnInterval: =>
-    return clearInterval @_extendLockInterval if @_isStopped
+    return clearInterval @_extendLockInterval if @_isStopped()
     locksToExtend = _.keys @slurries
     debug "about to extend a bunch of locks. Probably, like, #{locksToExtend.length} or something."
     async.each locksToExtend, @_extendLock, (error) =>
@@ -108,6 +106,7 @@ class SlurrySpreader extends EventEmitter2
     @connect (error) =>
       return callback error if error?
       @processQueueForever()
+      @extendLocksForever()
       callback()
 
   stop: (callback) =>
