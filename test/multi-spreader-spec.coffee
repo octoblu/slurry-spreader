@@ -53,7 +53,7 @@ xdescribe 'connect slurry stream', ->
     @sut2 = new SlurrySpreader {
       redisUri: 'redis://localhost:6379'
       namespace: 'test:slurry:spreader'
-      lockTimeout: 1000
+      lockTimeout: 1
       privateKey: PRIVATE_KEY
     }
 
@@ -65,13 +65,16 @@ xdescribe 'connect slurry stream', ->
     @sut2.stop done
 
   describe 'when we have 1 uuid', ->
-    beforeEach (done) ->
+    beforeEach ->
       slurry =
         uuid: 'user-device-uuid'
         auth:
           uuid: 'cred-uuid'
           token: 'cred-token'
-      @sut.add slurry, done
+
+      @sut.add slurry, => console.log 'added slurry1'
+      @sut2.add slurry, => console.log 'added slurry2'
+
       @_checkBothUuidArrays = =>
         sutSlurries = _.keys(@sut.slurries)
         sut2Slurries = _.keys(@sut2.slurries)
@@ -79,8 +82,8 @@ xdescribe 'connect slurry stream', ->
         console.log 'sut', sutSlurries
         console.log 'sut2', sut2Slurries
         console.log '-----------\n'
-        async.each sutSlurries, @sut._releaseLockAndUnsubscribe, =>
-          async.each sut2Slurries, @sut2._releaseLockAndUnsubscribe, =>
+        # async.each sutSlurries, @sut._releaseLockAndUnsubscribe, =>
+        #   async.each sut2Slurries, @sut2._releaseLockAndUnsubscribe, =>
 
     it 'should not be in both suts', (done) ->
       setInterval @_checkBothUuidArrays, 1000

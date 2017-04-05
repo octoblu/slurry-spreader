@@ -48,6 +48,9 @@ class SlurrySpreader extends EventEmitter2
     @queueClient = new RedisNS @namespace, redis.createClient(@redisUri, dropBufferSupport: true)
 
     @redlock = new Redlock [@queueClient], retryCount: 0
+    @redlock.on 'clientError', (error) =>
+      debug 'A redis error has occurred:', error
+
     callback()
 
   delay: ({ uuid, timeout }, callback) =>
@@ -180,7 +183,10 @@ class SlurrySpreader extends EventEmitter2
         return callback null, true
 
   _isLockExpired: (uuid) =>
-    return @slurries[uuid].lock.expiration < Date.now()
+    expiration = @slurries[uuid].lock.expiration
+    now = Date.now()
+    debug '_isLockExpired', uuid, expiration, now, expiration < now
+    return expiration < now
 
   _isStopped: =>
     @stopped
