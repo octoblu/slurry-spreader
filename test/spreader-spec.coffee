@@ -197,7 +197,7 @@ describe 'connect slurry stream', ->
                 done()
               return # stupid promises
 
-  describe '-> processQueue', ->
+  describe '-> start', ->
     describe 'when a slurry is in the queue', ->
       beforeEach (done) ->
         data =
@@ -209,11 +209,13 @@ describe 'connect slurry stream', ->
 
         encrypted = @encryption.encrypt JSON.stringify data
 
+        @sut.once 'processedQueue', done
+
         async.series [
           async.apply @redisClient.set, 'data:user-device-uuid', encrypted
           async.apply @redisClient.lpush, 'slurries', 'user-device-uuid'
-          async.apply @sut.processQueue
-        ], done
+          async.apply @sut.start
+        ], (error) => done(error) if error?
 
       it 'should lock the record', (done) ->
         @redlock.lock "locks:user-device-uuid", 1000, (error, lock) =>
@@ -224,11 +226,14 @@ describe 'connect slurry stream', ->
 
       describe 'when the slurry comes back through the queue with the same nonce (20ms later)', ->
         beforeEach (done) ->
+
+          @sut.once 'processedQueue', done
+
           async.series [
             (callback) => _.delay callback, 20
             async.apply @redisClient.lpush, 'slurries', 'user-device-uuid'
-            async.apply @sut.processQueue
-          ], done
+            async.apply @sut.start
+          ], (error) => done(error) if error?
 
         it 'should extend the lock', (done) ->
           wait40ms = (fn) => _.delay fn, 40
@@ -241,34 +246,41 @@ describe 'connect slurry stream', ->
 
       describe 'when the slurry comes back through the queue with a different nonce', ->
         beforeEach (done) ->
-          doneTwice = _.after 2, done
+
+          @onDestroy = =>
+            @sut.stop done
 
           data =
             uuid: 'user-device-uuid'
-            nonce: 'different-nonce'
+            nonce: 'same-nonce'
             auth:
               uuid: 'cred-uuid'
               token: 'cred-token'
 
           encrypted = @encryption.encrypt JSON.stringify data
 
-          @onDestroy = sinon.spy => doneTwice()
+          @sut.on 'processedQueue', =>
+            data.nonce = Date.now()
+            encrypted = @encryption.encrypt JSON.stringify data
+            @redisClient.set 'data:user-device-uuid', encrypted, =>
+
           @sut.once 'destroy', @onDestroy
+
           async.series [
+            async.apply @sut.start
             async.apply @redisClient.set, 'data:user-device-uuid', encrypted
             async.apply @redisClient.lpush, 'slurries', 'user-device-uuid'
-            async.apply @sut.processQueue
-          ], doneTwice
+          ], (error) => done(error) if error?
 
-        it 'should immediately cancel the lock', (done) ->
-          @redlock.lock "locks:user-device-uuid", 1000, (error, lock) =>
-            expect(error).not.to.exist
-            expect(lock).to.exist
-            done()
-          return # stupid promises
-
-        it 'should emit destroy with the uuid', ->
-          expect(@onDestroy).to.have.been.calledWith {uuid: 'user-device-uuid'}
+        it 'should cancel the lock at the unlock interval', (done) ->
+          wait1000ms = (fn) => _.delay fn, 1000
+          wait1000ms =>
+            @redlock.lock "locks:user-device-uuid", 1000, (error, lock) =>
+              console.log error.message if error?
+              expect(error).not.to.exist
+              expect(lock).to.exist
+              done()
+            return # stupid promises
 
   describe 'emit: create', ->
     describe 'when a slurry is added', ->

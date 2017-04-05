@@ -64,6 +64,7 @@ class SlurrySpreader extends EventEmitter2
   processQueue: (cb) =>
     callback = (error) =>
       return cb error if error?
+      @emit 'processedQueue'
       return _.delay cb, 100
 
     @queueClient.brpoplpush 'slurries', 'slurries', 30, (error, uuid) =>
@@ -77,7 +78,7 @@ class SlurrySpreader extends EventEmitter2
         @_isDelayed uuid, (error, delayed) =>
           return callback error if error?
           return callback() if delayed == true
-          return @_extendOrReleaseLock uuid, callback if @_isSubscribed(uuid)
+          return callback() if @_isSubscribed(uuid)
           return @_acquireLock uuid, callback
 
     return # stupid promises
@@ -94,7 +95,7 @@ class SlurrySpreader extends EventEmitter2
     return clearInterval @_extendLockInterval if @_isStopped()
     locksToExtend = _.keys @slurries
     debug "about to extend a bunch of locks. Probably, like, #{locksToExtend.length} or something."
-    async.each locksToExtend, @_extendLock, (error) =>
+    async.each locksToExtend, @_extendOrReleaseLock, (error) =>
       debug "extended #{locksToExtend.length} locks. Error: #{error?.stack}"
 
   remove: ({ uuid }, callback) =>
@@ -163,7 +164,7 @@ class SlurrySpreader extends EventEmitter2
     slurry.lock.extend @lockTimeout, callback
 
   _extendOrReleaseLock: (uuid, callback) =>
-    return callback() unless @_isSubscribed uuid
+    debug "_extendOrReleaseLock #{uuid}: #{@slurries[uuid].nonce}"
 
     @_getSlurry uuid, (error, slurryData) =>
       return callback error if error?
