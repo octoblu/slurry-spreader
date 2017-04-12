@@ -1,7 +1,8 @@
+_             = require 'lodash'
 async         = require 'async'
 EventEmitter2 = require 'eventemitter2'
+moment        = require 'moment'
 redis         = require 'ioredis'
-_             = require 'lodash'
 Encryption    = require 'meshblu-encryption'
 RedisNS       = require '@octoblu/redis-ns'
 Redlock       = require 'redlock'
@@ -100,7 +101,8 @@ class SlurrySpreader extends EventEmitter2
       debug "extended #{locksToExtend.length} locks. Error: #{error?.stack}"
 
   _emitOnlineUntil: (uuid) =>
-    @emit 'onlineUntil', {uuid, until: @lockTimeout}
+    onlineUntil = moment().utc().add(@lockTimeout, 'ms')
+    @emit 'onlineUntil', {uuid, until: onlineUntil}
 
   remove: ({ uuid }, callback) =>
     debug 'remove', uuid

@@ -1,6 +1,6 @@
 {
   "name": "slurry-spreader",
-  "version": "2.3.0",
+  "version": "2.3.1",
   "description": "Spread the Slurry around",
   "main": "index.js",
   "scripts": {
@@ -47,6 +47,7 @@
     "ioredis": "^2.3.0",
     "lodash": "^4.15.0",
     "meshblu-encryption": "^2.0.1",
+    "moment": "^2.18.1",
     "redlock": "^2.0.0",
     "uuid": "^2.0.2"
   },
