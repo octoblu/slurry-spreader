@@ -95,8 +95,12 @@ class SlurrySpreader extends EventEmitter2
     return clearInterval @_extendLockInterval if @_isStopped()
     locksToExtend = _.keys @slurries
     debug "about to extend a bunch of locks. Probably, like, #{locksToExtend.length} or something."
+    _.each locksToExtend, @_emitOnlineUntil
     async.each locksToExtend, @_extendOrReleaseLock, (error) =>
       debug "extended #{locksToExtend.length} locks. Error: #{error?.stack}"
+
+  _emitOnlineUntil: (uuid) =>
+    @emit 'onlineUntil', {uuid, until: @lockTimeout}
 
   remove: ({ uuid }, callback) =>
     debug 'remove', uuid
