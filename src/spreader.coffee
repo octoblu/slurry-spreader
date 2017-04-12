@@ -102,7 +102,7 @@ class SlurrySpreader extends EventEmitter2
 
   _emitOnlineUntil: (uuid) =>
     onlineUntil = moment().utc().add(@lockTimeout, 'ms')
-    @emit 'onlineUntil', {uuid, until: onlineUntil}
+    @emit 'onlineUntil', {uuid, onlineUntil}
 
   remove: ({ uuid }, callback) =>
     debug 'remove', uuid
