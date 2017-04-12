@@ -96,13 +96,12 @@ class SlurrySpreader extends EventEmitter2
     return clearInterval @_extendLockInterval if @_isStopped()
     locksToExtend = _.keys @slurries
     debug "about to extend a bunch of locks. Probably, like, #{locksToExtend.length} or something."
-    _.each locksToExtend, @_emitOnlineUntil
     async.each locksToExtend, @_extendOrReleaseLock, (error) =>
       debug "extended #{locksToExtend.length} locks. Error: #{error?.stack}"
 
-  _emitOnlineUntil: (uuid) =>
+  _emitOnlineUntil: (slurry) =>
     onlineUntil = moment().utc().add(@lockTimeout, 'ms')
-    @emit 'onlineUntil', {uuid, onlineUntil}
+    @emit 'onlineUntil', {slurry, onlineUntil}
 
   remove: ({ uuid }, callback) =>
     debug 'remove', uuid
@@ -177,8 +176,11 @@ class SlurrySpreader extends EventEmitter2
       return callback() unless @_isSubscribed uuid # Might no longer be subscribed
       return @_releaseLockAndRemoveFromQueue uuid, callback if _.isEmpty slurryData
       return @_unsubscribe uuid, callback                   if @_isLockExpired uuid
-      return @_extendLock uuid, callback                    if slurryData.nonce == @slurries[uuid].nonce
-      return @_releaseLockAndUnsubscribe uuid, callback
+      return @_releaseLockAndUnsubscribe uuid, callback     unless slurryData.nonce == @slurries[uuid].nonce
+
+      @_emitOnlineUntil slurryData
+      return @_extendLock uuid, callback
+
 
   _getSlurry: (uuid, callback) =>
     @redisClient.get "data:#{uuid}", (error, encrypted) =>
