@@ -2,12 +2,14 @@ _             = require 'lodash'
 async         = require 'async'
 EventEmitter2 = require 'eventemitter2'
 moment        = require 'moment'
-redis         = require 'ioredis'
+Redis         = require 'ioredis'
 Encryption    = require 'meshblu-encryption'
 RedisNS       = require '@octoblu/redis-ns'
 Redlock       = require 'redlock'
 UUID          = require 'uuid'
 debug         = require('debug')('slurry-spreader:spreader')
+GenericPool   = require 'generic-pool'
+When          = require 'when'
 
 class SlurrySpreader extends EventEmitter2
   constructor: ({@redisUri, @namespace, @lockTimeout, privateKey}, dependencies={}) ->
@@ -20,6 +22,11 @@ class SlurrySpreader extends EventEmitter2
     @encryption = Encryption.fromJustGuess privateKey
     @UUID ?= UUID
     @lockTimeout ?= 60 * 1000
+    @minConnections = 1
+    @maxConnections = 10
+    @idleTimeoutMillis = 60000
+    @_queuePool = @_createRedisPool { @maxConnections, @minConnections, @idleTimeoutMillis, @namespace, @redisUri }
+    @_commandPool = @_createRedisPool { @maxConnections, @minConnections, @idleTimeoutMillis, @namespace, @redisUri }
 
   add: (slurry, callback) =>
     slurry = _.cloneDeep slurry
@@ -31,13 +38,18 @@ class SlurrySpreader extends EventEmitter2
     @_encrypt JSON.stringify(slurry), (error, encrypted) =>
       return callback error if error?
 
-      tasks = [
-        async.apply @redisClient.set, "data:#{uuid}", encrypted
-        async.apply @redisClient.lrem, 'slurries', 0, uuid
-        async.apply @redisClient.rpush, 'slurries', uuid
-      ]
+      @_commandPool.acquire().then (redisClient) =>
+        tasks = [
+          async.apply redisClient.set, "data:#{uuid}", encrypted
+          async.apply redisClient.lrem, 'slurries', 0, uuid
+          async.apply redisClient.rpush, 'slurries', uuid
+        ]
 
-      async.series tasks, callback
+        async.series tasks, (error) =>
+          @_commandPool.release redisClient
+          callback error
+
+    return # promises
 
   close: ({uuid}, callback) =>
     debug 'close', uuid
@@ -45,21 +57,25 @@ class SlurrySpreader extends EventEmitter2
 
   connect: (callback) =>
     @slurries = {}
-    @redisClient = new RedisNS @namespace, redis.createClient(@redisUri, dropBufferSupport: true)
-    @queueClient = new RedisNS @namespace, redis.createClient(@redisUri, dropBufferSupport: true)
 
-    @redlock = new Redlock [@queueClient], retryCount: 0
-    @redlock.on 'clientError', (error) =>
-      debug 'A redis error has occurred:', error
+    @_queuePool.acquire().then (redlockClient) =>
+      @redlock = new Redlock [redlockClient], retryCount: 0
+      @redlock.on 'clientError', (error) =>
+        debug 'A redis error has occurred:', error
+        @stop _.noop
 
-    callback()
+      return callback()
+    .catch callback
+    return # promises
 
   delay: ({ uuid, timeout }, callback) =>
     debug 'delay', uuid, timeout
     timeout ?= 60 * 1000
     timeout = Math.round(timeout/1000)
     return callback new Error "Not subscribed to this slurry: #{uuid}" unless @_isSubscribed uuid
-    @redisClient.setex "delay:#{uuid}", timeout, Date.now(), callback
+    @_commandPool.acquire().then (redisClient) =>
+      redisClient.setex "delay:#{uuid}", timeout, Date.now(), callback
+      @_commandPool.release redisClient
     return # stupid promises
 
   processQueue: (cb) =>
@@ -68,20 +84,22 @@ class SlurrySpreader extends EventEmitter2
       @emit 'processedQueue'
       return _.delay cb, 100
 
-    @queueClient.brpoplpush 'slurries', 'slurries', 30, (error, uuid) =>
-      return callback error if error?
-      return callback() unless uuid?
-
-      @_isEncrypted uuid, (error, isEncrypted) =>
+    @_queuePool.acquire().then (queueClient) =>
+      queueClient.brpoplpush 'slurries', 'slurries', 30, (error, uuid) =>
+        @_queuePool.release queueClient
         return callback error if error?
-        return @_encryptAndRelease uuid, callback unless isEncrypted
+        return callback() unless uuid?
 
-        @_isDelayed uuid, (error, delayed) =>
+        @_isEncrypted uuid, (error, isEncrypted) =>
           return callback error if error?
-          return callback() if delayed == true
-          return callback() if @_isSubscribed(uuid)
-          return @_acquireLock uuid, callback
+          return @_encryptAndRelease uuid, callback unless isEncrypted
 
+          @_isDelayed uuid, (error, delayed) =>
+            return callback error if error?
+            return callback() if delayed == true
+            return callback() if @_isSubscribed(uuid)
+            return @_acquireLock uuid, callback
+    .catch callback
     return # stupid promises
 
   processQueueForever: =>
@@ -105,7 +123,10 @@ class SlurrySpreader extends EventEmitter2
 
   remove: ({ uuid }, callback) =>
     debug 'remove', uuid
-    @redisClient.del "data:#{uuid}", callback
+    @_commandPool.acquire().then (redisClient) =>
+      redisClient.del "data:#{uuid}", callback
+      @_commandPool.release redisClient
+    .catch callback
     return # stupid promises
 
   start: (callback) =>
@@ -153,13 +174,17 @@ class SlurrySpreader extends EventEmitter2
 
   _encryptAndRelease: (uuid, callback) =>
     debug '_encryptAndRelease', uuid
-    @redisClient.get "data:#{uuid}", (error, decrypted) =>
-      return callback error if error?
-      @_encrypt decrypted, (error, encrypted) =>
+    @_commandPool.acquire().then (redisClient) =>
+      redisClient.get "data:#{uuid}", (error, decrypted) =>
+        @_commandPool.release redisClient
         return callback error if error?
-        @redisClient.set "data:#{uuid}", encrypted, (error) =>
+        @_encrypt decrypted, (error, encrypted) =>
           return callback error if error?
-          @_releaseLockAndUnsubscribe uuid, callback
+          @_commandPool.acquire().then (redisClient) =>
+            redisClient.set "data:#{uuid}", encrypted, (error) =>
+              @_commandPool.release redisClient
+              return callback error if error?
+              @_releaseLockAndUnsubscribe uuid, callback
 
   _extendLock: (uuid, callback) =>
     debug '_extendLock', uuid
@@ -172,7 +197,9 @@ class SlurrySpreader extends EventEmitter2
     debug "_extendOrReleaseLock #{uuid}: #{@slurries[uuid].nonce}"
 
     @_getSlurry uuid, (error, slurryData) =>
-      return callback error if error?
+      if error?
+        @_unsubscribe uuid, _.noop
+        return callback error
       return callback() unless @_isSubscribed uuid # Might no longer be subscribed
       return @_releaseLockAndRemoveFromQueue uuid, callback if _.isEmpty slurryData
       return @_unsubscribe uuid, callback                   if @_isLockExpired uuid
@@ -183,25 +210,31 @@ class SlurrySpreader extends EventEmitter2
 
 
   _getSlurry: (uuid, callback) =>
-    @redisClient.get "data:#{uuid}", (error, encrypted) =>
-      return callback error if error?
-
-      @_decrypt encrypted, (error, decrypted) =>
+    @_commandPool.acquire().then (redisClient) =>
+      redisClient.get "data:#{uuid}", (error, encrypted) =>
+        @_commandPool.release redisClient
         return callback error if error?
 
-        @_jsonParse decrypted, callback
+        @_decrypt encrypted, (error, decrypted) =>
+          return callback error if error?
+
+          @_jsonParse decrypted, callback
 
   _isDelayed: (uuid, callback) =>
-    @redisClient.exists "delay:#{uuid}", (error, delayed) =>
-      debug "isDelayed: #{uuid} = #{delayed}"
-      return callback error, (delayed==1)
+    @_commandPool.acquire().then (redisClient) =>
+      redisClient.exists "delay:#{uuid}", (error, delayed) =>
+        @_commandPool.release redisClient
+        debug "isDelayed: #{uuid} = #{delayed}"
+        return callback error, (delayed==1)
 
   _isEncrypted: (uuid, callback) =>
-    @redisClient.get "data:#{uuid}", (error, encrypted) =>
-      return callback error if error?
-      @_decrypt encrypted, (error) =>
-        return callback null, false if error? # If we can't decrypt it, it ain't encrypted
-        return callback null, true
+    @_commandPool.acquire().then (redisClient) =>
+      redisClient.get "data:#{uuid}", (error, encrypted) =>
+        @_commandPool.release redisClient
+        return callback error if error?
+        @_decrypt encrypted, (error) =>
+          return callback null, false if error? # If we can't decrypt it, it ain't encrypted
+          return callback null, true
 
   _isLockExpired: (uuid) =>
     expiration = @slurries[uuid].lock.expiration
@@ -239,15 +272,60 @@ class SlurrySpreader extends EventEmitter2
 
   _releaseLockAndRemoveFromQueue: (uuid, callback) =>
     debug '_releaseLockAndRemoveFromQueue', uuid
-    async.series [
-      async.apply @redisClient.lrem, 'slurries', 0, uuid
-      async.apply @_releaseLockAndUnsubscribe, uuid
-    ], callback
+    @_commandPool.acquire().then (redisClient) =>
+      async.series [
+        async.apply redisClient.lrem, 'slurries', 0, uuid
+        async.apply @_releaseLockAndUnsubscribe, uuid
+      ], (error) =>
+        @_commandPool.release redisClient
+        callback error
 
   _unsubscribe: (uuid, callback) =>
     debug '_unsubscribe', uuid
     slurry = @slurries[uuid]
     delete @slurries[uuid]
     callback null, slurry
+
+  _createRedisPool: ({ maxConnections, minConnections, idleTimeoutMillis, evictionRunIntervalMillis, acquireTimeoutMillis, namespace, redisUri }) =>
+    factory =
+      create: =>
+        return When.promise (resolve, reject) =>
+          conx = new Redis redisUri, dropBufferSupport: true
+          client = new RedisNS namespace, conx
+          rejectError = (error) =>
+            return reject error
+
+          client.once 'error', rejectError
+          client.once 'ready', =>
+            client.removeListener 'error', rejectError
+            resolve client
+
+      destroy: (client) =>
+        return When.promise (resolve, reject) =>
+          @_closeClient client, (error) =>
+            return reject error if error?
+            resolve()
+
+      validate: (client) =>
+        return When.promise (resolve) =>
+          client.ping (error) =>
+            return resolve false if error?
+            resolve true
+
+    options = {
+      max: maxConnections
+      min: minConnections
+      testOnBorrow: true
+      idleTimeoutMillis
+      evictionRunIntervalMillis
+      acquireTimeoutMillis
+    }
+
+    pool = GenericPool.createPool factory, options
+
+    pool.on 'factoryCreateError', (error) =>
+      @emit 'factoryCreateError', error
+
+    return pool
 
 module.exports = SlurrySpreader
