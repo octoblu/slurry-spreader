@@ -139,7 +139,7 @@ class SlurrySpreader extends EventEmitter2
   stop: (callback) =>
     debug 'stop'
     @stopped = true
-    async.eachSeries _.keys(@slurries), @_releaseLockAndUnsubscribe, callback
+    async.each _.keys(@slurries), @_releaseLockAndUnsubscribe, callback
 
   _acquireLock: (uuid, callback) =>
     debug '_acquireLock', uuid
