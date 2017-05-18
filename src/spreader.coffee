@@ -48,6 +48,7 @@ class SlurrySpreader extends EventEmitter2
         async.series tasks, (error) =>
           @_commandPool.release redisClient
           callback error
+      .catch callback
 
     return # promises
 
@@ -76,6 +77,7 @@ class SlurrySpreader extends EventEmitter2
     @_commandPool.acquire().then (redisClient) =>
       redisClient.setex "delay:#{uuid}", timeout, Date.now(), callback
       @_commandPool.release redisClient
+    .catch callback
     return # stupid promises
 
   processQueue: (cb) =>
@@ -185,6 +187,8 @@ class SlurrySpreader extends EventEmitter2
               @_commandPool.release redisClient
               return callback error if error?
               @_releaseLockAndUnsubscribe uuid, callback
+    .catch callback
+    return # promises
 
   _extendLock: (uuid, callback) =>
     debug '_extendLock', uuid
@@ -219,6 +223,8 @@ class SlurrySpreader extends EventEmitter2
           return callback error if error?
 
           @_jsonParse decrypted, callback
+    .catch callback
+    return # promises
 
   _isDelayed: (uuid, callback) =>
     @_commandPool.acquire().then (redisClient) =>
@@ -226,6 +232,8 @@ class SlurrySpreader extends EventEmitter2
         @_commandPool.release redisClient
         debug "isDelayed: #{uuid} = #{delayed}"
         return callback error, (delayed==1)
+    .catch callback
+    return # promises
 
   _isEncrypted: (uuid, callback) =>
     @_commandPool.acquire().then (redisClient) =>
@@ -235,6 +243,8 @@ class SlurrySpreader extends EventEmitter2
         @_decrypt encrypted, (error) =>
           return callback null, false if error? # If we can't decrypt it, it ain't encrypted
           return callback null, true
+    .catch callback
+    return # promises
 
   _isLockExpired: (uuid) =>
     expiration = @slurries[uuid].lock.expiration
@@ -279,6 +289,8 @@ class SlurrySpreader extends EventEmitter2
       ], (error) =>
         @_commandPool.release redisClient
         callback error
+    .catch callback
+    return # promises
 
   _unsubscribe: (uuid, callback) =>
     debug '_unsubscribe', uuid
