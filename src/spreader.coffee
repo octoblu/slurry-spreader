@@ -81,7 +81,7 @@ class SlurrySpreader extends EventEmitter2
     return # stupid promises
 
   processQueue: (cb) =>
-    callback = (error) =>
+    callback = _.once (error) =>
       return cb error if error?
       @emit 'processedQueue'
       return _.delay cb, 100
